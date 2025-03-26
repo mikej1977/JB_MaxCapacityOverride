@@ -10,10 +10,13 @@ https://github.com/demiurgeQuantified/StarlitLibrary
 
 The addContainer args are formatted as ("type", capacity, preventNesting, equippedWeight)
 
-"type" = string - The item type to change. If you're unsure, you can getType() on your item to get it
-capacity = number - That is the max weight your container can hold
-preventNesting = true/false - Prevents putting the same "type" items in each other
-equippedWeight = number - Not used currently but will be the weight of the container when equipped on a character
+ -- "type" = string - The item type to change. If you're unsure, you can getType() on your item to get it
+
+ -- capacity = number - That is the max weight your container can hold
+
+ -- preventNesting = true/false - Prevents putting the same "type" items in each other
+
+ -- equippedWeight = number - Not used currently but will be the weight of the container when equipped on a character
 
 It is recommended to use this with your own container / type to prevent overwriting someone else's glorious work.
 

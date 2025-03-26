@@ -5,6 +5,9 @@ Max Capacity Override for Project Zomboid
 This is a pure Lua override that does not require any manual "java mod" installation.
 It works with bags, crates, truck beds, etc
 
+This mod requires Starlit Library by albion / demiurgeQuantified to fix up the tool tips to show the correct capacity.
+https://github.com/demiurgeQuantified/StarlitLibrary
+
 The addContainer args are formatted as ("type", capacity, preventNesting, equippedWeight)
 
 "type" = string - The item type to change. If you're unsure, you can getType() on your item to get it

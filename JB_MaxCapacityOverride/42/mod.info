@@ -1,0 +1,5 @@
+name=JB Max Capacity Override
+id=JB_MaxCapacityOverride
+poster=poster.png
+description=Override the hard coded container max capacities without the jank
+require=\StarlitLibrary

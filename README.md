@@ -1,6 +1,6 @@
 # JB_MaxCapacityOverride
 
-Pure Lua Max Capacity Override with 92% less jank!
+Pure Lua Max Capacity Override with 95% less jank!
 
 NOTE: This mod does nothing by itself. It is meant for the hard working modders, whom you should treat well.
 
@@ -11,9 +11,8 @@ This mod requires Starlit Library by albion to fix up the tool tips to show the 
 This is still a WIP. Things that need added or addressed are:
 
 Set up an equipped weight override (if I can)
-Vehicle trunk/seat damage should lower capacity like vanilla (will probably be a flag)
-Vehicle Info still shows the wrong capacity
 Check for when a player "right-click grabs" a container instead of letting it "bug" out.
+Add support for modifying player inventory capacity (if I can)
 
 Side note regarding the World Object Context Menu: It sucks
 
@@ -57,6 +56,6 @@ JB_MaxCapacityOverride.addContainer("TruckBedOpen", 500, false)
 3) Make sure to add require=\JB_MaxCapacityOverride to your mod.info
 4) upload it to the workshop.
 5) Bam
-6) 
+
 Available on the Steam Workshop at:
 https://steamcommunity.com/sharedfiles/filedetails/?id=3452113500

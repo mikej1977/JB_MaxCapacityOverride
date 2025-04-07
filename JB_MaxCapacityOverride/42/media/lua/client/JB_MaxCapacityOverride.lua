@@ -29,20 +29,17 @@ JB_MaxCapacityOverride.addContainer = function(containerType, capacity, preventN
         transferTimeModifier = _transferTimeSpeed -- or nil if not used
     }
 
-    local items = getScriptManager():getItemsByType(containerType)
-    for i = 0, items:size() - 1 do
-        items:get(i):DoParam("RunSpeedModifier = 1.0")
-        --items:get(i):setRunSpeedModifier(1)
-    end
-
     -- Thank you Nepenthe! Make sure y'all go to Nepenthe's workshop and drop a bunch of likes and awards on their superb mods!
-    local items = getScriptManager():getItemsByType(containerType)
-    for i = 0, items:size() - 1 do
-        items:get(i):DoParam("RunSpeedModifier = 1.0")
+    if getScriptManager():getItemsByType(containerType) then
+        local items = getScriptManager():getItemsByType(containerType)
+        for i = 0, items:size() - 1 do
+            items:get(i):DoParam("RunSpeedModifier = 1.0")
+        end
     end
 
     --print("JB_MaxCapacityOverride: Container override added succesfully: ", containerType)
 end
+
 
 --------------------------------------------------------------------------------
 ---  Function to modify the hover tooltip capacity #  --------------------------
@@ -189,6 +186,50 @@ end
 ItemContainer_getEffectiveCapacity.GetClass()
 
 --------------------------------------------------------------------------------
+
+local VehiclePart_getContainerCapacity = {}
+
+function VehiclePart_getContainerCapacity.GetClass()
+    local class, methodName = VehiclePart.class, "getContainerCapacity"
+    local metatable = __classmetatables[class]
+    local metatable__index = metatable.__index
+    local original_function = metatable__index[methodName]
+    metatable__index[methodName] = VehiclePart_getContainerCapacity.PatchClass(original_function)
+end
+
+function VehiclePart_getContainerCapacity.PatchClass(original_function)
+    return function(self, chr)
+        if not JB_MaxCapacityOverride.CONTAINERS_TO_OVERRIDE[self:getId()] then
+            return original_function(self, chr)
+        end
+
+        local function sickOfThis(maxCap, cond, min) -- public static float getNumberByCondition()
+            cond = cond + 20 * (100 - cond) / 100
+            local norm = cond / 100
+            return math.max(min, (maxCap * norm) * 100 / 100)
+        end
+
+        if not self:isContainer() then
+            return 0
+        elseif self:getInventoryItem() ~= nil and self:getItemContainer() ~= nil then
+            if self:getInventoryItem():isConditionAffectsCapacity() then
+                return math.floor(sickOfThis(self:getItemContainer():getCapacity(), self:getCondition(), 5))
+            else
+                return self:getItemContainer():getCapacity()
+            end
+        else
+            return original_function(self, chr)
+        end
+    end
+end
+
+VehiclePart_getContainerCapacity.GetClass()
+
+--------------------------------------------------------------------------------
+
+
+
+--------------------------------------------------------------------------------
 --- ISEquipWeaponAction.complete Override --------------------------------------
 --------------------------------------------------------------------------------
 
@@ -276,38 +317,60 @@ end
 local OG_ISInventoryTransferAction_new = ISInventoryTransferAction.new
 function ISInventoryTransferAction:new(character, item, srcContainer, destContainer, time)
     local f = OG_ISInventoryTransferAction_new(self, character, item, srcContainer, destContainer, time)
-    local oldMaxTime = f.maxTime
     if f.maxTime <= 1 then
         return f
     end
-    local itemWeight = item:getActualWeight()
+    local oldMaxTime = f.maxTime
     local timeOverride
-    if JB_MaxCapacityOverride.CONTAINERS_TO_OVERRIDE[destContainer:getType()] then
-        if JB_MaxCapacityOverride.CONTAINERS_TO_OVERRIDE[destContainer:getType()].transferTimeModifier then
-            timeOverride = JB_MaxCapacityOverride.CONTAINERS_TO_OVERRIDE[destContainer:getType()].transferTimeModifier
+    local CONFIG = {
+        weightModifier = 1.0,
+        capacityModifier = 1,
+        timeMultiplier = 8,
+        backpackModifier = .5,
+        defaultWeight = 3
+    }
+
+    local function getTransferTime(container)
+        local modifiedWeight = item:getActualWeight() > 3 and item:getActualWeight() * CONFIG.weightModifier or
+        CONFIG.defaultWeight
+        local containerMaxCapacity = container:getEffectiveCapacity() == 0 and 1 or container:getEffectiveCapacity()
+        local containerCurrentWeight = container:getCapacityWeight()
+        local backpack = getPlayerInventory(character:getPlayerNum()).inventory
+        local backpackModifier = backpack == container and CONFIG.backpackModifier or 1
+        local capacityContribution = CONFIG.capacityModifier * (containerCurrentWeight / containerMaxCapacity)
+        local transferTime = modifiedWeight * (backpackModifier + capacityContribution)
+        return transferTime * CONFIG.timeMultiplier
+    end
+
+    local function getOverrideType(container)
+        -- we may want to check if equipped backpack, and get a delta
+        -- from combined dest and src container combined capacity weight
+        return JB_MaxCapacityOverride.CONTAINERS_TO_OVERRIDE[container:getType()]
+    end
+
+    local overrideType = getOverrideType(destContainer) or getOverrideType(srcContainer)
+    if overrideType then
+        if overrideType.transferTimeModifier then
+            timeOverride = overrideType.transferTimeModifier
         end
-        f.maxTime = itemWeight * itemWeight
-    elseif JB_MaxCapacityOverride.CONTAINERS_TO_OVERRIDE[srcContainer:getType()] then
-        if JB_MaxCapacityOverride.CONTAINERS_TO_OVERRIDE[srcContainer:getType()].transferTimeModifier then
-            timeOverride = JB_MaxCapacityOverride.CONTAINERS_TO_OVERRIDE[srcContainer:getType()].transferTimeModifier
-        end
-        f.maxTime = itemWeight * itemWeight
+        f.maxTime = getTransferTime(overrideType == getOverrideType(destContainer) and destContainer or srcContainer)
     end
-    if character:HasTrait("Dextrous") then
-        f.maxTime = f.maxTime * 0.5
-    end
-    if character:HasTrait("AllThumbs") or character:isWearingAwkwardGloves() then
-        f.maxTime = f.maxTime * 2.0
-    end
+
+    local dextrousModifier = character:HasTrait("Dextrous") and 0.5 or 1
+    local clumsyModifier = (character:HasTrait("AllThumbs") or character:isWearingAwkwardGloves()) and 2.0 or 1
+    f.maxTime = f.maxTime * dextrousModifier * clumsyModifier
     if oldMaxTime < f.maxTime then
         f.maxTime = oldMaxTime
     end
-    if timeOverride then f.maxTime = timeOverride end
-    -- print("maxTime ", f.maxTime)
+    if timeOverride then
+        f.maxTime = timeOverride
+    end
+    --print("New maxTime: ", f.maxTime)
     return f
 end
 
 --------------------------------------------------------------------------------
+
 -- don't put that container in that container
 local function canWeGrabThatInvContext(playerNum, context, items)
     local containerloot = getPlayerLoot(playerNum)
@@ -334,8 +397,8 @@ local function canWeGrabThatInvContext(playerNum, context, items)
 
     local function processItem(item)
         local itemType = item:getType()
-        local itemName = item:getDisplayName()
-        local message = "You cannot nest these " .. itemName .. "'s"
+        --local itemName = item:getDisplayName()
+        local message = getText("RD_6fee6c8a-0cbd-4d13-bc9d-5ec5828e746f")
         local overrideData = JB_MaxCapacityOverride.CONTAINERS_TO_OVERRIDE[itemType]
         if not (overrideData and overrideData.preventNesting) then
             return
@@ -343,7 +406,6 @@ local function canWeGrabThatInvContext(playerNum, context, items)
 
         if item:isInPlayerInventory() and JB_MaxCapacityOverride.CONTAINERS_TO_OVERRIDE[lootContainerType] then
             if itemType ~= lootContainerType then return end
-            local message = "You cannot nest these " .. itemName .. "'s"
             markOptionNotavailable(
                 getText("ContextMenu_PutInContainer", item:getDisplayName()) or
                 getText("ContextMenu_Put_in_Container"), message

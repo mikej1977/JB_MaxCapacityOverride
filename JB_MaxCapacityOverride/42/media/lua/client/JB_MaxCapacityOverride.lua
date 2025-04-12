@@ -7,9 +7,15 @@ JB_MaxCapacityOverride.CONTAINERS_TO_OVERRIDE = JB_MaxCapacityOverride.CONTAINER
 ---- Main function to add containers to the override table ---------------------
 --------------------------------------------------------------------------------
 
-JB_MaxCapacityOverride.addContainer = function(containerType, capacity, preventNesting, _equippedWeight,
-                                               _transferTimeSpeed)
+JB_MaxCapacityOverride.addContainer = function(containerType, capacity, preventNesting, _equippedWeight, _transferTimeSpeed)
     -- we don't check if the item exists because it's stupid
+
+    -- this is not working. whyyy
+    if containerType == "playerinventorycontainer" then
+        Events.OnGameStart.Add(function()
+            getPlayer():getInventory():setType(containerType)
+        end)
+    end
 
     if capacity == nil or type(capacity) ~= "number" then
         print("ERROR - JB_MaxCapacityOverride: capacity not specified or was not a number")
@@ -25,7 +31,7 @@ JB_MaxCapacityOverride.addContainer = function(containerType, capacity, preventN
     JB_MaxCapacityOverride.CONTAINERS_TO_OVERRIDE[containerType] = {
         capacity = capacity,
         preventNesting = preventNesting,
-        equippedWeight = _equippedWeight,         -- or nil if not used
+        equippedWeight = _equippedWeight, -- or nil if not used
         transferTimeModifier = _transferTimeSpeed -- or nil if not used
     }
 
@@ -36,10 +42,8 @@ JB_MaxCapacityOverride.addContainer = function(containerType, capacity, preventN
             items:get(i):DoParam("RunSpeedModifier = 1.0")
         end
     end
-
-    --print("JB_MaxCapacityOverride: Container override added succesfully: ", containerType)
+    -- print("JB_MaxCapacityOverride: Container override added succesfully: ", containerType)
 end
-
 
 --------------------------------------------------------------------------------
 ---  Function to modify the hover tooltip capacity #  --------------------------
@@ -64,7 +68,7 @@ InventoryUI.onFillItemTooltip:addListener(changeThatTooltip)
 --- ItemContainer Patches ------------------------------------------------------
 --------------------------------------------------------------------------------
 
--- we has room for the meats?
+-- do we has room for the meats?
 local ItemContainer_hasRoomFor = {}
 
 function ItemContainer_hasRoomFor.GetClass()
@@ -89,16 +93,16 @@ function ItemContainer_hasRoomFor.PatchClass(original_function)
             if ISMouseDrag.dragging then
                 local draggedItems = ISInventoryPane.getActualItems(ISMouseDrag.dragging)
                 for i = 1, #draggedItems - 1 do
-                    if JB_MaxCapacityOverride.CONTAINERS_TO_OVERRIDE[draggedItems[i]:getType()]
-                        and draggedItems[i]:getType() == self:getType() then
+                    if JB_MaxCapacityOverride.CONTAINERS_TO_OVERRIDE[draggedItems[i]:getType()] and
+                        draggedItems[i]:getType() == self:getType() then
                         return false
                     end
                 end
             end
 
             if type(item) ~= "number" then
-                if (item:getType() and JB_MaxCapacityOverride.CONTAINERS_TO_OVERRIDE[item:getType()])
-                    and (self:getType() == item:getType()) then
+                if (item:getType() and JB_MaxCapacityOverride.CONTAINERS_TO_OVERRIDE[item:getType()]) and
+                    (self:getType() == item:getType()) then
                     return false
                 end
             end
@@ -168,15 +172,14 @@ function ItemContainer_getEffectiveCapacity.PatchClass(original_function)
             local containerCapacity = overrideData.capacity
             local effinCapacity = math.min(self:getCapacity(), containerCapacity)
 
-            if chr ~= nil and not (instanceof(self:getParent(), "IsoPlayer") and not instanceof(self:getParent(), "IsoDeadBody")) then
-                if chr:getTraits():contains("Organized") then
-                    return math.max(effinCapacity * 1.3, self:getCapacity() + 1)
-                elseif chr:getTraits():contains("Disorganized") then
-                    return math.max(effinCapacity * 0.7, 1.0)
+            if chr and not instanceof(self:getParent(), "IsoPlayer") or instanceof(self:getParent(), "IsoDeadBody") then
+                local multiplier = chr:getTraits():contains("Organized") and 1.3 or chr:getTraits():contains("Disorganized") and 0.7
+                if multiplier then
+                    return math.max(effinCapacity * multiplier, self:getCapacity() + (multiplier > 1 and 1 or 0))
                 end
             end
 
-            return effinCapacity
+            return math.ceil(effinCapacity)
         end
 
         return original_function(self, chr)
@@ -227,145 +230,122 @@ VehiclePart_getContainerCapacity.GetClass()
 
 --------------------------------------------------------------------------------
 
-
-
 --------------------------------------------------------------------------------
 --- ISEquipWeaponAction.complete Override --------------------------------------
 --------------------------------------------------------------------------------
 
--- I am not sorry I did this
+-- I am not sorry I did this. A little rewrite on the vanilla to make it easier to follow
 local OG_ISEquipWeaponAction_complete = ISEquipWeaponAction.complete
 
 function ISEquipWeaponAction:complete()
-    -- this is not the container you're looking for so buh bye
     if not JB_MaxCapacityOverride.CONTAINERS_TO_OVERRIDE[self.item:getType()] then
         return OG_ISEquipWeaponAction_complete(self)
     end
     if self:isAlreadyEquipped(self.item) then
         return false
     end
-    if self.character:getClothingItem_Back() and self.character:getClothingItem_Back():hasTag("ReplacePrimary") and self.character:getClothingItem_Back():getClothingItemExtra() and self.character:getClothingItem_Back():getClothingItemExtra():get(0) then
-        ISClothingExtraAction:performNew(self.character, self.character:getClothingItem_Back(),
-            self.character:getClothingItem_Back():getClothingItemExtra():get(0))
+
+    local backItem = self.character:getClothingItem_Back()
+    if backItem and backItem:hasTag("ReplacePrimary") and backItem:getClothingItemExtra() then
+        local extraItem = backItem:getClothingItemExtra():get(0)
+        if extraItem then
+            ISClothingExtraAction:performNew(self.character, backItem, extraItem)
+        end
     end
-    if self.character:isEquippedClothing(self.item) then
-        -- self.character:removeWornItem(self.item)         -- I guess forceDrop is true by default, so we just make it false
-        self.character:removeWornItem(self.item, false) -- this is seriously the only thing that needed changed to make this work ugh
+
+    local function updateClothing(item, forceDrop)
+        self.character:removeWornItem(item, forceDrop)
         triggerEvent("OnClothingUpdated", self.character)
+    end
+
+    if self.character:isEquippedClothing(self.item) then
+        updateClothing(self.item, false)
     end
     forceDropHeavyItems(self.character)
-    if self.character:isEquippedClothing(self.item) then
-        self.character:removeWornItem(self.item)
-        triggerEvent("OnClothingUpdated", self.character)
+
+    local function handleHandItem(item, isPrimaryHand)
+        local equippedItem = isPrimaryHand and self.character:getPrimaryHandItem() or self.character:getSecondaryHandItem()
+        if equippedItem and (equippedItem == item or equippedItem:isRequiresEquippedBothHands()) then
+            if isPrimaryHand then
+                self.character:setPrimaryHandItem(nil)
+            else
+                self.character:setSecondaryHandItem(nil)
+            end
+        end
     end
+
     if not self.twoHands then
-        if (self.primary) then
-            if self.character:getSecondaryHandItem() and self.character:getSecondaryHandItem():isRequiresEquippedBothHands() then
-                self.character:setSecondaryHandItem(nil);
+        if self.primary then
+            handleHandItem(self.character:getSecondaryHandItem(), false, true)
+            if instanceof(self.item, "HandWeapon") and self.item:getSwingAnim() == "Handgun" then
+                handleHandItem(self.character:getSecondaryHandItem(), false, true)
             end
-            if (self.character:getSecondaryHandItem() == self.item or self.character:getSecondaryHandItem() == self.character:getPrimaryHandItem()) then
-                self.character:setSecondaryHandItem(nil);
-            end
-            if instanceof(self.item, "HandWeapon") and self.item:getSwingAnim() and self.item:getSwingAnim() == "Handgun" then
-                if self.character:getSecondaryHandItem() and instanceof(self.character:getSecondaryHandItem(), "HandWeapon") then
-                    self.character:setSecondaryHandItem(nil);
-                end
-            end
-            if not self.character:getPrimaryHandItem() or self.character:getPrimaryHandItem() ~= self.item then
-                self.character:setPrimaryHandItem(nil);
-                self.character:setPrimaryHandItem(self.item);
+            if self.character:getPrimaryHandItem() ~= self.item then
+                self.character:setPrimaryHandItem(self.item)
             end
         else
-            if self.character:getPrimaryHandItem() and self.character:getPrimaryHandItem():isRequiresEquippedBothHands() then
-                self.character:setPrimaryHandItem(nil);
-            end
-            if (self.character:getPrimaryHandItem() == self.item or self.character:getSecondaryHandItem() == self.character:getPrimaryHandItem()) then
-                self.character:setPrimaryHandItem(nil);
-            end
-            if instanceof(self.item, "HandWeapon") and self.character:getPrimaryHandItem() then
-                local primary = self.character:getPrimaryHandItem()
-                if instanceof(primary, "HandWeapon") and primary:getSwingAnim() and primary:getSwingAnim() == "Handgun" then
-                    self.character:setPrimaryHandItem(nil);
-                end
-            end
-            if not self.character:getSecondaryHandItem() or self.character:getSecondaryHandItem() ~= self.item then
-                self.character:setSecondaryHandItem(nil);
-                self.character:setSecondaryHandItem(self.item);
+            handleHandItem(self.character:getPrimaryHandItem(), true, false)
+            if not self.character:getSecondaryHandItem() then
+                self.character:setSecondaryHandItem(self.item)
             end
         end
     else
-        self.character:setPrimaryHandItem(nil);
-        self.character:setSecondaryHandItem(nil);
-        self.character:setPrimaryHandItem(self.item);
-        self.character:setSecondaryHandItem(self.item);
+        self.character:setPrimaryHandItem(self.item)
+        self.character:setSecondaryHandItem(self.item)
     end
+
     if self.item:canBeActivated() and not self.item:hasTag("Lighter") and not instanceof(self.item, "HandWeapon") then
-        self.item:setActivated(true);
-        self.item:playActivateSound();
+        self.item:setActivated(true)
+        self.item:playActivateSound()
     end
+
     if not isServer() then
         getPlayerInventory(self.character:getPlayerNum()):refreshBackpacks()
     else
         sendEquip(self.character)
     end
-    return true;
+
+    return true
 end
 
 --------------------------------------------------------------------------------
 
--- not sorry I did this either
+-- not sorry I did this either. like vanilla+ transfer times
 local OG_ISInventoryTransferAction_new = ISInventoryTransferAction.new
+
 function ISInventoryTransferAction:new(character, item, srcContainer, destContainer, time)
     local f = OG_ISInventoryTransferAction_new(self, character, item, srcContainer, destContainer, time)
     if f.maxTime <= 1 then
         return f
     end
-    local oldMaxTime = f.maxTime
-    local timeOverride
+
     local CONFIG = {
-        weightModifier = 1.0,
-        capacityModifier = 1,
         timeMultiplier = 8,
-        backpackModifier = .5,
-        defaultWeight = 3
+        backpackModifier = 0.5,
+        defaultWeight = 2
     }
 
     local function getTransferTime(container)
-        local modifiedWeight = item:getActualWeight() > 3 and item:getActualWeight() * CONFIG.weightModifier or
-        CONFIG.defaultWeight
-        local containerMaxCapacity = container:getEffectiveCapacity() == 0 and 1 or container:getEffectiveCapacity()
-        local containerCurrentWeight = container:getCapacityWeight()
-        local backpack = getPlayerInventory(character:getPlayerNum()).inventory
-        local backpackModifier = backpack == container and CONFIG.backpackModifier or 1
-        local capacityContribution = CONFIG.capacityModifier * (containerCurrentWeight / containerMaxCapacity)
-        local transferTime = modifiedWeight * (backpackModifier + capacityContribution)
-        return transferTime * CONFIG.timeMultiplier
+        local modifiedWeight = math.max(item:getActualWeight(), CONFIG.defaultWeight)
+        local containerMaxCapacity = math.max(container:getEffectiveCapacity(), 1)
+        local capacityContribution = (container:getCapacityWeight() / containerMaxCapacity)
+        local equippedBackpackModifier = (getPlayerInventory(character:getPlayerNum()).inventory == container) and CONFIG.backpackModifier or 1
+        return modifiedWeight * (equippedBackpackModifier + capacityContribution) * CONFIG.timeMultiplier
     end
 
     local function getOverrideType(container)
-        -- we may want to check if equipped backpack, and get a delta
-        -- from combined dest and src container combined capacity weight
         return JB_MaxCapacityOverride.CONTAINERS_TO_OVERRIDE[container:getType()]
     end
 
     local overrideType = getOverrideType(destContainer) or getOverrideType(srcContainer)
     if overrideType then
-        if overrideType.transferTimeModifier then
-            timeOverride = overrideType.transferTimeModifier
-        end
-        f.maxTime = getTransferTime(overrideType == getOverrideType(destContainer) and destContainer or srcContainer)
+        f.maxTime = overrideType.transferTimeModifier or getTransferTime(destContainer or srcContainer)
     end
 
     local dextrousModifier = character:HasTrait("Dextrous") and 0.5 or 1
     local clumsyModifier = (character:HasTrait("AllThumbs") or character:isWearingAwkwardGloves()) and 2.0 or 1
-    f.maxTime = f.maxTime * dextrousModifier * clumsyModifier
-    if oldMaxTime < f.maxTime then
-        f.maxTime = oldMaxTime
-    end
-    if timeOverride then
-        f.maxTime = timeOverride
-    end
-    --print("New maxTime: ", f.maxTime)
+    f.maxTime = math.min(f.maxTime * dextrousModifier * clumsyModifier, f.maxTime)
+
     return f
 end
 
@@ -378,12 +358,9 @@ local function canWeGrabThatInvContext(playerNum, context, items)
     local lootContainerType = containerloot.inventory:getType()
     local playerContainerType = playerLoot.inventory:getType()
 
-    local grabOptions = {
-        getText("ContextMenu_Grab"),
-        getText("ContextMenu_Grab_one"),
-        getText("ContextMenu_Grab_half"),
-        getText("ContextMenu_Grab_all")
-    }
+    local grabOptions = { getText("ContextMenu_Grab"), getText("ContextMenu_Grab_one"), 
+                          getText("ContextMenu_Grab_half"),
+                          getText("ContextMenu_Grab_all") }
 
     local function markOptionNotavailable(optionName, message)
         local option = context:getOptionFromName(optionName)
@@ -397,31 +374,31 @@ local function canWeGrabThatInvContext(playerNum, context, items)
 
     local function processItem(item)
         local itemType = item:getType()
-        --local itemName = item:getDisplayName()
-        local message = getText("RD_6fee6c8a-0cbd-4d13-bc9d-5ec5828e746f")
+        local message = getText("RD_6fee6c8a-0cbd-4d13-bc9d-5ec5828e746f") -- use radio text that's already translated
         local overrideData = JB_MaxCapacityOverride.CONTAINERS_TO_OVERRIDE[itemType]
         if not (overrideData and overrideData.preventNesting) then
             return
         end
 
         if item:isInPlayerInventory() and JB_MaxCapacityOverride.CONTAINERS_TO_OVERRIDE[lootContainerType] then
-            if itemType ~= lootContainerType then return end
-            markOptionNotavailable(
-                getText("ContextMenu_PutInContainer", item:getDisplayName()) or
-                getText("ContextMenu_Put_in_Container"), message
-            )
+            if itemType ~= lootContainerType then
+                return
+            end
+            markOptionNotavailable(getText("ContextMenu_PutInContainer", item:getDisplayName()) or getText("ContextMenu_Put_in_Container"), message)
         elseif not item:isInPlayerInventory() and JB_MaxCapacityOverride.CONTAINERS_TO_OVERRIDE[playerContainerType] then
-            if itemType ~= playerContainerType then return end
+            if itemType ~= playerContainerType then
+                return
+            end
             for i = 1, #grabOptions do
                 markOptionNotavailable(grabOptions[i], message)
             end
         end
     end
 
-    -- look at that code below... combo stacks can eat me
+    -- combo stacks can eat me
     for i = 1, #items do
         local item = items[i]
-        local comboItems = instanceof(item, "InventoryItem") and { item } or item.items
+        local comboItems = instanceof(item, "InventoryItem") and {item} or item.items
         for j = 1, #comboItems do
             processItem(comboItems[j])
         end

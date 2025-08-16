@@ -1,51 +1,62 @@
-# JB_MaxCapacityOverride
+Pure Lua Max Capacity Override (v1.1)
+🚀 Now with 98.355% less jank!
 
-Pure Lua Max Capacity Override with 95% less jank!
+Compatible ONLY with Build 42 — does NOT work with Build 41.
 
-NOTE: This mod does nothing by itself. It is meant for the hard working modders, whom you should treat well.
+📝 Summary
+This mod provides a pure Lua MAX_CAPACITY override without needing any Java mod installations. It works on:
+"Equipable" Bags
+Crates / Containers
+Truck beds / Trunks
+Sprite containers (with some limitations)
 
-This is a pure Lua MAX_CAPACITY override that does not require any manual "java mod" installation. It works with bags, crates, truck beds, etc
+Regarding the "require=\StarlitLibrary" line in the mod.info: 
+As of Build 42, the backslash is required.
+https://pzwiki.net/wiki/Mod.info
 
-This mod requires Starlit Library by albion to fix up the tool tips to show the correct capacity in tooltips.
+⚠️ This mod does nothing on its own. It’s intended for your friendly neighborhood modder.
 
-This is still a WIP. Things that need added or addressed are:
+Requires Starlit Library by albion for correct tooltip capacity display.
 
-Set up an equipped weight override (if I can)
-Check for when a player "right-click grabs" a container instead of letting it "bug" out.
-Add support for modifying player inventory capacity (if I can)
+🆕 07/31/25
+Re-added mod data override for single containers. Example usage:
+yourContainer:getModData()["JB_MaxCapacityOverride"] = { capacity = 75 }
 
-Side note regarding the World Object Context Menu: It sucks
+✅ Works if the container type exists in the lookup table
+✅ Compatible with bags and sprite containers
+❌ Mod data override not yet compatible with trunks (WIP)
 
-Includes Nepenthe's speed fix from "Remove Bag Slowdown" with permission
-Make sure y'all go to Nepenthe's workshop and drop a ton of likes and awards on their superb mods!
+⚒️ Current To-Do List
+[ ] Add equipped weight override
+[ ] Handle right-click grab bug
+[ ] Consider player inventory capacity override (probably not)
+[ ] Fix transfer times for heavy items in world context (borked right now)
+
+📌 Side note: The World Object Context Menu can eat me.
+
+💨 Performance Boost
+Includes Nepenthe's speed fix from Remove Bag Slowdown (used with permission).
+
+💌 Drop likes and awards on Nepenthe’s workshop:
 https://steamcommunity.com/id/drstalker/myworkshopfiles/
 
-This fix will NOT keep you moving fast if you're overloaded and have the "Heavy Load" moodle
+⚠️ This fix does NOT bypass the “Heavy Load” moodle slowdown.
 
-What you should know
+🧪 Argument Structure (for addContainer)
+("type", capacity, preventNesting, _equippedWeight, _transferTimeSpeed)
 
-The addContainer args are formatted as ("type", capacity, preventNesting, _equippedWeight. _transferTimeSpeed)
+type | string | Container type (use getType() to find it)
+capacity | number | Max weight container can hold
+preventNesting | boolean | Prevents nesting same type containers
+_equippedWeight | number | (optional) Weight of equipped container
+_transferTimeSpeed | number | (optional) Transfer time override
 
-"type" = string - The item type to change. If you're unsure, you can getType() on your container to get it
-capacity = number - That is the max weight your container can hold
-preventNesting = true/false - Prevents putting the same "type" containers in each other
-_equippedWeight = number - Can be nil. Not used currently but will be the weight of the container when equipped on a character
-_transferTimeSpeed = number - Can be nil. An action "time" override when transferring an item to/from your fancy container
+✅ Error checking included for capacity and preventNesting.
+❓ Equipped weight and transfer speed are optional — defaults to nil.
 
-It's recommended to use this with your own container / type to prevent overwriting someone else's glorious work
-
-There is some error checking:
-If a capacity is not passed or it's not a number, then nope
-If preventNesting is not passed or it's not a boolean, then nope
-We don't care about equippedWeight or _transferTimeSpeed right now. They can be nil. This might change in the near future
-
-How To Use
-
-An example of how to use this mod with your container/bag/vehicle:
-
-1) Make a separate Lua file:
-
-2) Add the code below. Replace the args with whatever you need
+📦 How To Use
+[ ] Create a new Lua file
+[ ] Add and customize the following code:
 
 local JB_MaxCapacityOverride = require("JB_MaxCapacityOverride")
 
@@ -53,9 +64,6 @@ JB_MaxCapacityOverride.addContainer("Bag_ShotgunDblSawnoffBag", 125, true, nil, 
 JB_MaxCapacityOverride.addContainer("militarycrate", 180, true)
 JB_MaxCapacityOverride.addContainer("TruckBedOpen", 500, false)
 
-3) Make sure to add require=\JB_MaxCapacityOverride to your mod.info
-4) upload it to the workshop.
-5) Bam
+[ ] Add to your mod.info: require=JB_MaxCapacityOverride
 
-Available on the Steam Workshop at:
-https://steamcommunity.com/sharedfiles/filedetails/?id=3452113500
+[ ] Upload to the workshop

@@ -3,39 +3,48 @@ local InventoryUI = require("Starlit/client/ui/InventoryUI") -- all praise albio
 local JB_MaxCapacityOverride = {}
 JB_MaxCapacityOverride.CONTAINERS_TO_OVERRIDE = JB_MaxCapacityOverride.CONTAINERS_TO_OVERRIDE or {}
 
+-- July 31, 2025 :  added mod data support to change capacity on individual containers. big thanks to Eizen for the inspiration and testing!
+--                  cleaned up the code a bit. comments are a little spicier.
+--                  fixed up getEffectiveCapacity to not be stupid.
+
 --------------------------------------------------------------------------------
 ---- Main function to add containers to the override table ---------------------
 --------------------------------------------------------------------------------
 
 JB_MaxCapacityOverride.addContainer = function(containerType, capacity, preventNesting, _equippedWeight, _transferTimeSpeed)
-    -- we don't check if the item exists because it's stupid
+    -- we don't check if the item exists anymore because it's stupid
 
-    -- this is not working. whyyy
-    if containerType == "playerinventorycontainer" then
+    -- this is not 100% working. whyyy (whispers "becawsitz in da javas")
+--[[     if containerType == "playerinventorycontainer" then
         Events.OnGameStart.Add(function()
             getPlayer():getInventory():setType(containerType)
         end)
-    end
+    end ]]
 
     if capacity == nil or type(capacity) ~= "number" then
         print("ERROR - JB_MaxCapacityOverride: capacity not specified or was not a number")
         return
     end
+
     if preventNesting == nil or type(preventNesting) ~= "boolean" then
         print("ERROR - JB_MaxCapacityOverride: preventNesting was not specified or was not true/false")
         return
     end
+
     if not JB_MaxCapacityOverride.CONTAINERS_TO_OVERRIDE[containerType] then
         JB_MaxCapacityOverride.CONTAINERS_TO_OVERRIDE[containerType] = {}
     end
+
+    capacity = math.floor(capacity * 100) / 100
+
     JB_MaxCapacityOverride.CONTAINERS_TO_OVERRIDE[containerType] = {
         capacity = capacity,
         preventNesting = preventNesting,
-        equippedWeight = _equippedWeight, -- or nil if not used
-        transferTimeModifier = _transferTimeSpeed -- or nil if not used
+        equippedWeight = _equippedWeight,         -- or nil
+        transferTimeModifier = _transferTimeSpeed -- or nil
     }
 
-    -- Thank you Nepenthe! Make sure y'all go to Nepenthe's workshop and drop a bunch of likes and awards on their superb mods!
+    -- Thank you Nepenthe!
     if getScriptManager():getItemsByType(containerType) then
         local items = getScriptManager():getItemsByType(containerType)
         for i = 0, items:size() - 1 do
@@ -51,13 +60,16 @@ end
 
 local function changeThatTooltip(tooltip, layout, container)
     local overrideData = JB_MaxCapacityOverride.CONTAINERS_TO_OVERRIDE[container:getType()]
-    if overrideData then
-        for i = 0, layout.items:size() - 1 do
-            local layoutItem = layout.items:get(i)
-            if layoutItem.label == getText("Tooltip_container_Capacity") .. ":" then
-                layoutItem:setValue(tostring(overrideData.capacity), 1, 1, 1, 1)
-                break
-            end
+    if not overrideData then return end
+
+    local modData = container:getModData()["JB_MaxCapacityOverride"]
+    local containerCapacity = (modData and modData.capacity) or overrideData.capacity
+
+    for i = 0, layout.items:size() - 1 do
+        local layoutItem = layout.items:get(i)
+        if layoutItem.label == getText("Tooltip_container_Capacity") .. ":" then
+            layoutItem:setValue(tostring(containerCapacity), 1, 1, 1, 1)
+            break
         end
     end
 end
@@ -88,7 +100,7 @@ function ItemContainer_hasRoomFor.PatchClass(original_function)
             return original_function(self, chr, item)
         end
 
-        -- prevent nesting containers of the same type
+        -- don't put that container in that container
         if overrideData and overrideData.preventNesting then
             if ISMouseDrag.dragging then
                 local draggedItems = ISInventoryPane.getActualItems(ISMouseDrag.dragging)
@@ -128,8 +140,6 @@ ItemContainer_hasRoomFor.GetClass()
 
 --------------------------------------------------------------------------------
 
---- when equipped, report the fake 'equipped' weight? hmmm
-
 -- return our fat caps
 local ItemContainer_getCapacity = {}
 function ItemContainer_getCapacity.GetClass()
@@ -142,10 +152,13 @@ end
 
 function ItemContainer_getCapacity.PatchClass(original_function)
     return function(self)
-        if JB_MaxCapacityOverride.CONTAINERS_TO_OVERRIDE[self:getType()] then
-            return JB_MaxCapacityOverride.CONTAINERS_TO_OVERRIDE[self:getType()].capacity
-        end
-        return original_function(self)
+        local containerType = self:getType()
+        local overrideData = JB_MaxCapacityOverride.CONTAINERS_TO_OVERRIDE[containerType]
+        if not overrideData then return original_function(self) end
+
+        local item = instanceof(self, "ItemContainer") and self:getContainingItem() or self:getParent()
+        local modData = item and item:getModData()["JB_MaxCapacityOverride"]
+        return (modData and modData.capacity) or overrideData.capacity
     end
 end
 
@@ -167,22 +180,36 @@ function ItemContainer_getEffectiveCapacity.PatchClass(original_function)
     return function(self, chr)
         local containerType = self:getType()
         local overrideData = JB_MaxCapacityOverride.CONTAINERS_TO_OVERRIDE[containerType]
-
-        if overrideData and overrideData.capacity then
-            local containerCapacity = overrideData.capacity
-            local effinCapacity = math.min(self:getCapacity(), containerCapacity)
-
-            if chr and not instanceof(self:getParent(), "IsoPlayer") or instanceof(self:getParent(), "IsoDeadBody") then
-                local multiplier = chr:getTraits():contains("Organized") and 1.3 or chr:getTraits():contains("Disorganized") and 0.7
-                if multiplier then
-                    return math.max(effinCapacity * multiplier, self:getCapacity() + (multiplier > 1 and 1 or 0))
-                end
-            end
-
-            return math.ceil(effinCapacity)
+        if not (overrideData and overrideData.capacity) then
+            return original_function(self, chr)
         end
 
-        return original_function(self, chr)
+        -- print(getPlayer():getInventory():getEffectiveCapacity(getPlayer()))
+
+        local containerCapacity = overrideData.capacity
+
+        if instanceof(self, "ItemContainer") then
+            local item = self:getContainingItem() or self:getParent()
+            local modData = item and item:getModData()["JB_MaxCapacityOverride"]
+            if modData and modData.capacity then
+                containerCapacity = modData.capacity
+            end
+        end
+
+        local effCap = math.min(self:getCapacity(), containerCapacity)
+
+        local parent = self:getParent()
+        
+        if chr and (not instanceof(parent, "IsoPlayer") or instanceof(parent, "IsoDeadBody")) then
+            local traits = chr:getTraits()
+            local multiplier = traits:contains("Organized") and 1.3 or traits:contains("Disorganized") and 0.7
+            if multiplier then
+                local baseCap = self:getCapacity()
+                effCap = math.max(effCap * multiplier, baseCap + (multiplier > 1 and 1 or 0))
+            end
+        end
+
+        return math.ceil(effCap)
     end
 end
 
@@ -202,27 +229,26 @@ end
 
 function VehiclePart_getContainerCapacity.PatchClass(original_function)
     return function(self, chr)
-        if not JB_MaxCapacityOverride.CONTAINERS_TO_OVERRIDE[self:getId()] then
-            return original_function(self, chr)
-        end
 
-        local function sickOfThis(maxCap, cond, min) -- public static float getNumberByCondition()
+        local overrideData = JB_MaxCapacityOverride.CONTAINERS_TO_OVERRIDE[self:getId()]
+        if not overrideData then return original_function(self, chr) end
+        if not self:isContainer() then return 0 end
+
+        local inventoryItem = self:getInventoryItem()
+        local itemContainer = self:getItemContainer()
+        if not (inventoryItem and itemContainer) then return original_function(self, chr) end
+
+        local function sickOfThis(maxCap, cond, min)
             cond = cond + 20 * (100 - cond) / 100
-            local norm = cond / 100
-            return math.max(min, (maxCap * norm) * 100 / 100)
+            local normalized = cond / 100
+            return math.max(min, maxCap * normalized)
         end
 
-        if not self:isContainer() then
-            return 0
-        elseif self:getInventoryItem() ~= nil and self:getItemContainer() ~= nil then
-            if self:getInventoryItem():isConditionAffectsCapacity() then
-                return math.floor(sickOfThis(self:getItemContainer():getCapacity(), self:getCondition(), 5))
-            else
-                return self:getItemContainer():getCapacity()
-            end
-        else
-            return original_function(self, chr)
+        if inventoryItem:isConditionAffectsCapacity() then
+            return math.floor(sickOfThis(itemContainer:getCapacity(), self:getCondition(), 5))
         end
+
+        return itemContainer:getCapacity()
     end
 end
 
@@ -241,6 +267,7 @@ function ISEquipWeaponAction:complete()
     if not JB_MaxCapacityOverride.CONTAINERS_TO_OVERRIDE[self.item:getType()] then
         return OG_ISEquipWeaponAction_complete(self)
     end
+
     if self:isAlreadyEquipped(self.item) then
         return false
     end
@@ -264,7 +291,8 @@ function ISEquipWeaponAction:complete()
     forceDropHeavyItems(self.character)
 
     local function handleHandItem(item, isPrimaryHand)
-        local equippedItem = isPrimaryHand and self.character:getPrimaryHandItem() or self.character:getSecondaryHandItem()
+        local equippedItem = isPrimaryHand and self.character:getPrimaryHandItem() or
+        self.character:getSecondaryHandItem()
         if equippedItem and (equippedItem == item or equippedItem:isRequiresEquippedBothHands()) then
             if isPrimaryHand then
                 self.character:setPrimaryHandItem(nil)
@@ -329,7 +357,8 @@ function ISInventoryTransferAction:new(character, item, srcContainer, destContai
         local modifiedWeight = math.max(item:getActualWeight(), CONFIG.defaultWeight)
         local containerMaxCapacity = math.max(container:getEffectiveCapacity(), 1)
         local capacityContribution = (container:getCapacityWeight() / containerMaxCapacity)
-        local equippedBackpackModifier = (getPlayerInventory(character:getPlayerNum()).inventory == container) and CONFIG.backpackModifier or 1
+        local equippedBackpackModifier = (getPlayerInventory(character:getPlayerNum()).inventory == container) and
+        CONFIG.backpackModifier or 1
         return modifiedWeight * (equippedBackpackModifier + capacityContribution) * CONFIG.timeMultiplier
     end
 
@@ -358,9 +387,9 @@ local function canWeGrabThatInvContext(playerNum, context, items)
     local lootContainerType = containerloot.inventory:getType()
     local playerContainerType = playerLoot.inventory:getType()
 
-    local grabOptions = { getText("ContextMenu_Grab"), getText("ContextMenu_Grab_one"), 
-                          getText("ContextMenu_Grab_half"),
-                          getText("ContextMenu_Grab_all") }
+    local grabOptions = { getText("ContextMenu_Grab"), getText("ContextMenu_Grab_one"),
+        getText("ContextMenu_Grab_half"),
+        getText("ContextMenu_Grab_all") }
 
     local function markOptionNotavailable(optionName, message)
         local option = context:getOptionFromName(optionName)
@@ -384,7 +413,9 @@ local function canWeGrabThatInvContext(playerNum, context, items)
             if itemType ~= lootContainerType then
                 return
             end
-            markOptionNotavailable(getText("ContextMenu_PutInContainer", item:getDisplayName()) or getText("ContextMenu_Put_in_Container"), message)
+            markOptionNotavailable(
+            getText("ContextMenu_PutInContainer", item:getDisplayName()) or getText("ContextMenu_Put_in_Container"),
+                message)
         elseif not item:isInPlayerInventory() and JB_MaxCapacityOverride.CONTAINERS_TO_OVERRIDE[playerContainerType] then
             if itemType ~= playerContainerType then
                 return
@@ -398,7 +429,7 @@ local function canWeGrabThatInvContext(playerNum, context, items)
     -- combo stacks can eat me
     for i = 1, #items do
         local item = items[i]
-        local comboItems = instanceof(item, "InventoryItem") and {item} or item.items
+        local comboItems = instanceof(item, "InventoryItem") and { item } or item.items
         for j = 1, #comboItems do
             processItem(comboItems[j])
         end

@@ -256,94 +256,37 @@ VehiclePart_getContainerCapacity.GetClass()
 
 --------------------------------------------------------------------------------
 
---------------------------------------------------------------------------------
---- ISEquipWeaponAction.complete Override --------------------------------------
---------------------------------------------------------------------------------
-
--- I am not sorry I did this. A little rewrite on the vanilla to make it easier to follow
+local IsoPlayer = __classmetatables[IsoPlayer.class].__index
 local OG_ISEquipWeaponAction_complete = ISEquipWeaponAction.complete
 
 function ISEquipWeaponAction:complete()
-    if not JB_MaxCapacityOverride.CONTAINERS_TO_OVERRIDE[self.item:getType()] then
-        return OG_ISEquipWeaponAction_complete(self)
-    end
-
-    if self:isAlreadyEquipped(self.item) then
-        return false
-    end
-
-    local backItem = self.character:getClothingItem_Back()
-    if backItem and backItem:hasTag("ReplacePrimary") and backItem:getClothingItemExtra() then
-        local extraItem = backItem:getClothingItemExtra():get(0)
-        if extraItem then
-            ISClothingExtraAction:performNew(self.character, backItem, extraItem)
+    local OG_removeWornItem = IsoPlayer.removeWornItem
+    if JB_MaxCapacityOverride.CONTAINERS_TO_OVERRIDE[self.item:getType()] then
+        IsoPlayer.removeWornItem = function(self, item)
+            --print("overriding removeWornItems")
+            return OG_removeWornItem(self, item, false)
         end
     end
-
-    local function updateClothing(item, forceDrop)
-        self.character:removeWornItem(item, forceDrop)
-        triggerEvent("OnClothingUpdated", self.character)
-    end
-
-    if self.character:isEquippedClothing(self.item) then
-        updateClothing(self.item, false)
-    end
-    forceDropHeavyItems(self.character)
-
-    local function handleHandItem(item, isPrimaryHand)
-        local equippedItem = isPrimaryHand and self.character:getPrimaryHandItem() or
-        self.character:getSecondaryHandItem()
-        if equippedItem and (equippedItem == item or equippedItem:isRequiresEquippedBothHands()) then
-            if isPrimaryHand then
-                self.character:setPrimaryHandItem(nil)
-            else
-                self.character:setSecondaryHandItem(nil)
-            end
-        end
-    end
-
-    if not self.twoHands then
-        if self.primary then
-            handleHandItem(self.character:getSecondaryHandItem(), false, true)
-            if instanceof(self.item, "HandWeapon") and self.item:getSwingAnim() == "Handgun" then
-                handleHandItem(self.character:getSecondaryHandItem(), false, true)
-            end
-            if self.character:getPrimaryHandItem() ~= self.item then
-                self.character:setPrimaryHandItem(self.item)
-            end
-        else
-            handleHandItem(self.character:getPrimaryHandItem(), true, false)
-            if not self.character:getSecondaryHandItem() then
-                self.character:setSecondaryHandItem(self.item)
-            end
-        end
-    else
-        self.character:setPrimaryHandItem(self.item)
-        self.character:setSecondaryHandItem(self.item)
-    end
-
-    if self.item:canBeActivated() and not self.item:hasTag("Lighter") and not instanceof(self.item, "HandWeapon") then
-        self.item:setActivated(true)
-        self.item:playActivateSound()
-    end
-
-    if not isServer() then
-        getPlayerInventory(self.character:getPlayerNum()):refreshBackpacks()
-    else
-        sendEquip(self.character)
-    end
-
-    return true
+    OG_ISEquipWeaponAction_complete(self)
+    IsoPlayer.removeWornItem = OG_removeWornItem
 end
 
 --------------------------------------------------------------------------------
 
--- not sorry I did this either. like vanilla+ transfer times
+-- not sorry I did this
 local OG_ISInventoryTransferAction_new = ISInventoryTransferAction.new
 
 function ISInventoryTransferAction:new(character, item, srcContainer, destContainer, time)
+    
     local f = OG_ISInventoryTransferAction_new(self, character, item, srcContainer, destContainer, time)
-    if f.maxTime <= 1 then
+    
+    local function getOverrideType(container)
+        return JB_MaxCapacityOverride.CONTAINERS_TO_OVERRIDE[container:getType()]
+    end
+
+    local overrideType = getOverrideType(destContainer) or getOverrideType(srcContainer)
+
+    if not overrideType or f.maxTime <= 1 then
         return f
     end
 
@@ -362,11 +305,6 @@ function ISInventoryTransferAction:new(character, item, srcContainer, destContai
         return modifiedWeight * (equippedBackpackModifier + capacityContribution) * CONFIG.timeMultiplier
     end
 
-    local function getOverrideType(container)
-        return JB_MaxCapacityOverride.CONTAINERS_TO_OVERRIDE[container:getType()]
-    end
-
-    local overrideType = getOverrideType(destContainer) or getOverrideType(srcContainer)
     if overrideType then
         f.maxTime = overrideType.transferTimeModifier or getTransferTime(destContainer or srcContainer)
     end

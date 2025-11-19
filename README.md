@@ -1,6 +1,7 @@
 Pure Lua Max Capacity Override for PZ B42+
 
 Requires Starlit Library by albion for correct tooltip capacity display
+
 Includes Nepenthe's speed fix from Remove Bag Slowdown (used with permission)
 
 This fix does NOT bypass the “Heavy Load” moodle slowdown.

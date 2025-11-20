@@ -1,25 +1,7 @@
--- July 31, 2025 :  added mod data support to change capacity on individual containers. big thanks to Eizen for the inspiration and testing
---                  cleaned up the code a bit. comments are a little spicier
---                  fixed up getEffectiveCapacity to not be stupid
---
--- September 5th, 2025 :  added support for dropping y'all 5000 weight bags on the floor
---
--- October 4th, 2025   :  added late loading for function pacthes and a bypass for Customizable Containers
-
---------------------------------------------------------------------------------
----- Main function to add containers to the override table ---------------------
---------------------------------------------------------------------------------
-
 local InventoryUI = require("Starlit/client/ui/InventoryUI")
 
 local JB_MaxCapacityOverride = {}
 JB_MaxCapacityOverride.CONTAINERS_TO_OVERRIDE = JB_MaxCapacityOverride.CONTAINERS_TO_OVERRIDE or {}
-
-local ItemContainer_hasRoomFor = {}
-local ItemContainer_getCapacity = {}
-local ItemContainer_getEffectiveCapacity = {}
-local InventoryContainer_getUnequippedWeight = {}
-local VehiclePart_getContainerCapacity = {}
 
 local JB_Wrap = {}
 function JB_Wrap.wrap(class, methodName, wrapperFunc)
@@ -32,7 +14,6 @@ function JB_Wrap.wrap(class, methodName, wrapperFunc)
     local wrapped = wrapperFunc(originalFunc)
 
     metatable.__index[methodName] = wrapped
-
 end
 
 local function weShouldBeTheNiceGuy(containerType)
@@ -44,7 +25,6 @@ local function weShouldBeTheNiceGuy(containerType)
 end
 
 JB_MaxCapacityOverride.addContainer = function(containerType, capacity, preventNesting, _equippedWeight, _transferTimeSpeed)
-
     if capacity == nil or type(capacity) ~= "number" then
         print("ERROR - JB_MaxCapacityOverride: capacity not specified or was not a number")
         return
@@ -76,10 +56,6 @@ JB_MaxCapacityOverride.addContainer = function(containerType, capacity, preventN
     end
 end
 
---------------------------------------------------------------------------------
----  Function to modify the hover tooltip capacity #  --------------------------
---------------------------------------------------------------------------------
-
 local function changeThatTooltip(tooltip, layout, container)
     local overrideData = JB_MaxCapacityOverride.CONTAINERS_TO_OVERRIDE[container:getType()]
     if not overrideData then return end
@@ -96,13 +72,7 @@ local function changeThatTooltip(tooltip, layout, container)
     end
 end
 
---------------------------------------------------------------------------------
---- ItemContainer Patches ------------------------------------------------------
---------------------------------------------------------------------------------
-
--- do we has room for the meats?
-
-function ItemContainer_hasRoomFor.PatchClass(original_function)
+local function ItemContainer_hasRoomFor_PatchClass(original_function)
     return function(self, chr, item)
         local containerType = self:getType()
 
@@ -114,6 +84,12 @@ function ItemContainer_hasRoomFor.PatchClass(original_function)
 
         if containerType == "ItemContainer" and not self:isItemAllowed(item) then
             return original_function(self, chr, item)
+        end
+
+        if self.getParent and instanceof(self:getParent(), "BaseVehicle") then
+            if string.find(self:getType(), "TruckBed") then
+                overrideData = JB_MaxCapacityOverride.CONTAINERS_TO_OVERRIDE[self:getParent():getScriptName()]
+            end
         end
 
         -- don't put that container in that container
@@ -154,7 +130,7 @@ end
 
 --------------------------------------------------------------------------------
 
-function ItemContainer_getCapacity.PatchClass(original_function)
+local function ItemContainer_getCapacity_PatchClass(original_function)
     return function(self)
         local containerType = self:getType()
 
@@ -163,6 +139,13 @@ function ItemContainer_getCapacity.PatchClass(original_function)
         end
 
         local overrideData = JB_MaxCapacityOverride.CONTAINERS_TO_OVERRIDE[containerType]
+        
+        if self.getParent and instanceof(self:getParent(), "BaseVehicle") then
+            if string.find(self:getType(), "TruckBed") then
+                overrideData = JB_MaxCapacityOverride.CONTAINERS_TO_OVERRIDE[self:getParent():getScriptName()]
+            end
+        end
+        
         if not overrideData then return original_function(self) end
 
         local item = instanceof(self, "ItemContainer") and self:getContainingItem() or self:getParent()
@@ -173,7 +156,7 @@ end
 
 --------------------------------------------------------------------------------
 
-function ItemContainer_getEffectiveCapacity.PatchClass(original_function)
+local function ItemContainer_getEffectiveCapacity_PatchClass(original_function)
     return function(self, chr)
         local containerType = self:getType()
 
@@ -182,11 +165,16 @@ function ItemContainer_getEffectiveCapacity.PatchClass(original_function)
         end
 
         local overrideData = JB_MaxCapacityOverride.CONTAINERS_TO_OVERRIDE[containerType]
+
+        if self.getParent and instanceof(self:getParent(), "BaseVehicle") then
+            if string.find(self:getType(), "TruckBed") then
+                overrideData = JB_MaxCapacityOverride.CONTAINERS_TO_OVERRIDE[self:getParent():getScriptName()]
+            end
+        end
+
         if not (overrideData and overrideData.capacity) then
             return original_function(self, chr)
         end
-
-        -- print(getPlayer():getInventory():getEffectiveCapacity(getPlayer()))
 
         local containerCapacity = overrideData.capacity
 
@@ -217,9 +205,15 @@ end
 
 --------------------------------------------------------------------------------
 
-function InventoryContainer_getUnequippedWeight.PatchClass(original_function)
+local function InventoryContainer_getUnequippedWeight_PatchClass(original_function)
     return function(self)
         local overrideData = JB_MaxCapacityOverride.CONTAINERS_TO_OVERRIDE[self:getType()]
+
+        if self.getParent and instanceof(self:getParent(), "BaseVehicle") then
+            if string.find(self:getType(), "TruckBed") then
+                overrideData = JB_MaxCapacityOverride.CONTAINERS_TO_OVERRIDE[self:getParent():getScriptName()]
+            end
+        end
 
         if weShouldBeTheNiceGuy(self:getType()) then
             return original_function(self)
@@ -235,14 +229,20 @@ end
 
 --------------------------------------------------------------------------------
 
-function VehiclePart_getContainerCapacity.PatchClass(original_function)
+local function VehiclePart_getContainerCapacity_PatchClass(original_function)
     return function(self, chr)
-
         if weShouldBeTheNiceGuy(self:getId()) then
             return original_function(self, chr)
         end
 
         local overrideData = JB_MaxCapacityOverride.CONTAINERS_TO_OVERRIDE[self:getId()]
+
+        if self.getParent and instanceof(self:getParent(), "BaseVehicle") then
+            if string.find(self:getType(), "TruckBed") then
+                overrideData = JB_MaxCapacityOverride.CONTAINERS_TO_OVERRIDE[self:getParent():getScriptName()]
+            end
+        end
+
         if not overrideData then return original_function(self, chr) end
         if not self:isContainer() then return 0 end
 
@@ -267,13 +267,11 @@ end
 --------------------------------------------------------------------------------
 
 Events.OnGameStart.Add(function()
-
     -- late loading
 
     local IsoPlayer = __classmetatables[IsoPlayer.class].__index
     local OG_ISEquipWeaponAction_complete = ISEquipWeaponAction.complete
 
-    -- not messing with this since we only change removeWornItem and immediately set it back
     function ISEquipWeaponAction:complete()
         local OG_removeWornItem = IsoPlayer.removeWornItem
         if JB_MaxCapacityOverride.CONTAINERS_TO_OVERRIDE[self.item:getType()] then
@@ -294,12 +292,18 @@ Events.OnGameStart.Add(function()
     function ISInventoryTransferAction:new(character, item, srcContainer, destContainer, time)
         local tsMod = getActivatedMods():contains("\\TrueSmoking")
         local SOTO = character:HasTrait("GasManagement")
-            
+
         local f = OG_ISInventoryTransferAction_new(self, character, item, srcContainer, destContainer, time)
 
         local function getOverrideType(container)
             if container and container:getType() then
-                return JB_MaxCapacityOverride.CONTAINERS_TO_OVERRIDE[container:getType()]
+                local first = JB_MaxCapacityOverride.CONTAINERS_TO_OVERRIDE[container:getType()]
+                if container.getParent and instanceof(container:getParent(), "BaseVehicle") then
+                    if string.find(container:getType(), "TruckBed") then
+                        return JB_MaxCapacityOverride.CONTAINERS_TO_OVERRIDE[container:getParent():getScriptName()]
+                    end
+                end
+                return first
             end
             return nil
         end
@@ -339,7 +343,6 @@ Events.OnGameStart.Add(function()
 
         return f
     end
-
 end)
 
 --------------------------------------------------------------------------------
@@ -378,8 +381,8 @@ local function canWeGrabThatInvContext(playerNum, context, items)
                 return
             end
             markOptionNotavailable(
-            getText("ContextMenu_PutInContainer", item:getDisplayName()) or getText("ContextMenu_Put_in_Container"),
-            message)
+                getText("ContextMenu_PutInContainer", item:getDisplayName()) or getText("ContextMenu_Put_in_Container"),
+                message)
         elseif not item:isInPlayerInventory() and JB_MaxCapacityOverride.CONTAINERS_TO_OVERRIDE[playerContainerType] then
             if itemType ~= playerContainerType then
                 return
@@ -401,35 +404,16 @@ local function canWeGrabThatInvContext(playerNum, context, items)
 end
 
 Events.OnGameStart.Add(function()
-    function ItemContainer_hasRoomFor.GetClass()
-        JB_Wrap.wrap(ItemContainer.class, "hasRoomFor", ItemContainer_hasRoomFor.PatchClass)
-    end
 
-    function ItemContainer_getCapacity.GetClass()
-        JB_Wrap.wrap(ItemContainer.class, "getCapacity", ItemContainer_getCapacity.PatchClass)
-    end
+    JB_Wrap.wrap(ItemContainer.class, "hasRoomFor", ItemContainer_hasRoomFor_PatchClass)
+    JB_Wrap.wrap(ItemContainer.class, "getCapacity", ItemContainer_getCapacity_PatchClass)
+    JB_Wrap.wrap(ItemContainer.class, "getEffectiveCapacity", ItemContainer_getEffectiveCapacity_PatchClass)
+    JB_Wrap.wrap(InventoryContainer.class, "getUnequippedWeight", InventoryContainer_getUnequippedWeight_PatchClass)
+    JB_Wrap.wrap(VehiclePart.class, "getContainerCapacity", VehiclePart_getContainerCapacity_PatchClass)
 
-    function ItemContainer_getEffectiveCapacity.GetClass()
-        JB_Wrap.wrap(ItemContainer.class, "getEffectiveCapacity", ItemContainer_getEffectiveCapacity.PatchClass)
-    end
-
-    function InventoryContainer_getUnequippedWeight.GetClass()
-        JB_Wrap.wrap(InventoryContainer.class, "getUnequippedWeight", InventoryContainer_getUnequippedWeight.PatchClass)
-    end
-
-    function VehiclePart_getContainerCapacity.GetClass()
-        JB_Wrap.wrap(VehiclePart.class, "getContainerCapacity", VehiclePart_getContainerCapacity.PatchClass)
-    end
     InventoryUI.onFillItemTooltip:addListener(changeThatTooltip)
     Events.OnFillInventoryObjectContextMenu.Add(canWeGrabThatInvContext)
-    ItemContainer_hasRoomFor.GetClass()
-    ItemContainer_getCapacity.GetClass()
-    ItemContainer_getEffectiveCapacity.GetClass()
-    VehiclePart_getContainerCapacity.GetClass()
-    InventoryContainer_getUnequippedWeight.GetClass()
 
 end)
-
---------------------------------------------------------------------------------
 
 return JB_MaxCapacityOverride -- always return the meats
